@@ -227,12 +227,14 @@ GAZE_BINS = 90
 GAZE_BINWIDTH = 4
 GAZE_ANGLE_OFFSET = 180
 GAZE_FRAME_STRIDE = int(os.getenv("GAZE_FRAME_STRIDE", "8"))
+ADHD_THRESHOLD = float(os.getenv("ADHD_THRESHOLD", "0.229"))
 
 STT_MODEL_NAME = os.getenv("STT_MODEL_NAME", "small.en")
 STT_BEAM_SIZE = int(os.getenv("STT_BEAM_SIZE", "1"))
 STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "float16")
 STT_DEFAULT_LANGUAGE = os.getenv("STT_DEFAULT_LANGUAGE", "en")
 STT_VAD_FILTER = os.getenv("STT_VAD_FILTER", "0") == "1"
+STT_WARMUP_ON_STARTUP = os.getenv("STT_WARMUP_ON_STARTUP", "0") == "1"
 _STT_MODEL: Optional[WhisperModel] = None
 
 
@@ -257,10 +259,13 @@ def startup_warmup_gaze_runtime():
     except Exception as e:
         print(f"Gaze runtime warmup failed (will retry on first request): {e}")
 
-    try:
-        get_stt_model()
-    except Exception as e:
-        print(f"STT model warmup failed (will retry on first request): {e}")
+    if STT_WARMUP_ON_STARTUP:
+        try:
+            get_stt_model()
+        except Exception as e:
+            print(f"STT model warmup failed (will retry on first request): {e}")
+    else:
+        print("STT warmup skipped at startup (set STT_WARMUP_ON_STARTUP=1 to enable).")
 
 
 @app.post("/api/transcribe")
@@ -359,7 +364,6 @@ async def adhd_diagnose(
     )
     variability = compute_gaze_variability(gaze_series)
 
-    ADHD_THRESHOLD = 0.229  # TODO: tune
     adhd_result = "ADHD" if variability > ADHD_THRESHOLD else "No ADHD"
 
     # ---- Structured console logging for gaze output ----
@@ -367,7 +371,7 @@ async def adhd_diagnose(
         print("\n================= ADHD Gaze Analysis =================")
         print(f" Video file (temp)          : {os.path.basename(video_path)}")
         print(f" Converted MP4              : {os.path.basename(mp4_path)}")
-        print(f" Frames analyzed (stride=5) : {len(gaze_series)}")
+        print(f" Frames analyzed (stride={GAZE_FRAME_STRIDE}) : {len(gaze_series)}")
         print(f" Variability (rad)          : {variability:.6f}")
         print(f" Threshold (rad)            : {ADHD_THRESHOLD:.6f}")
         print(f" Result                     : {adhd_result}")
@@ -390,6 +394,7 @@ async def adhd_diagnose(
     return {
         "adhd_gaze_variability": variability,
         "adhd_result": adhd_result,
+        "adhd_threshold": ADHD_THRESHOLD,
         "num_gaze_frames": len(gaze_series),
     }
 
